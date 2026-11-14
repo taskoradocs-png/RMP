@@ -21,11 +21,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p project
           unzip -q routermanager-pro.zip -d project
 
           SETTINGS=$(find project -name settings.gradle.kts -type f | head -n 1)
-          test -n "$SETTINGS"
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: Android project not found"
+            exit 1
+          fi
 
           PROJECT_ROOT=$(dirname "$SETTINGS")
           echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
@@ -37,6 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           FILE="$PROJECT_ROOT/gradle/libs.versions.toml"
 
           sed -i 's/googleDevtoolsKsp = "2.3.5"/googleDevtoolsKsp = "2.3.6"/' "$FILE"
@@ -48,6 +54,23 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Generate Android debug keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          keytool -genkeypair -v \
+            -keystore "$PROJECT_ROOT/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+          test -f "$PROJECT_ROOT/debug.keystore"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -72,9 +95,17 @@ jobs:
           gradle :app:assembleDebug --stacktrace
 
       - name: Verify APK
+        shell: bash
         run: |
-          test -f "$PROJECT_ROOT/app/build/outputs/apk/debug/app-debug.apk"
-          ls -lh "$PROJECT_ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          APK="$PROJECT_ROOT/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not generated"
+            exit 1
+          fi
+
+          echo "APK successfully generated:"
+          ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
